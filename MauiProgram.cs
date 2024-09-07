@@ -53,17 +53,14 @@ public static class MauiProgram
 		// Register the FolderPicker as a singleton
 		builder.Services.AddSingleton<IFolderPicker>(FolderPicker.Default);
 		builder.Services.AddSingleton<IFilePicker>(FilePicker.Default);
-		builder.Services.AddSingleton<IKeyboardServices, KeyboardServices>();
 		builder.Services.AddSingleton<Idb, Db>();
 		LoggerFactory.Initialize(config);
 		builder.Services.AddSingleton(LogOperatorRetriever.Instance);
-		builder.Services.AddSingleton<BookPage>();
 
-		builder.Services.AddSingleton<BookViewModel>();
+		builder.Services.AddTransient<BookPage>();
+		builder.Services.AddTransient<BookViewModel>();
 		builder.Services.AddSingleton<LibraryPage>();
 		builder.Services.AddSingleton<LibraryViewModel>();
-
-
 		
 		return builder.Build();
 	}

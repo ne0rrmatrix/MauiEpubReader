@@ -13,8 +13,8 @@ public class Book
 	public int NumberOfPages { get; set; } = 0;
 	public int NumberOfChapters { get; set; } = 0;
 	public string FileName { get; set; } = string.Empty;
-	public int CurrentPage { get; set; } = 1;
-	public int CurrentChapter { get; set; } = 1;
+	public int CurrentPage { get; set; } = 0;
+	public int CurrentChapter { get; set; } = 0;
 	public string Title { get; set; } = string.Empty;
 	public string CoverImage { get; set; } = string.Empty;
 	[OneToMany(CascadeOperations = CascadeOperation.All)]

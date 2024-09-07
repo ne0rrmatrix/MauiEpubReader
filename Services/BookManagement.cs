@@ -8,9 +8,9 @@ public static class BookManagement
 	public static async Task<Book?> Parse(EpubBook epub, string fileName, CancellationToken cancellationToken = default)
 	{
 		ICollection<EpubTextFile> html = epub.Resources.Html;
-
 		if (html is null || epub.TableOfContents is null)
 		{
+			System.Diagnostics.Trace.TraceError("HTML or TOC is null");
 			return null;
 		}
 		try
@@ -23,45 +23,26 @@ public static class BookManagement
 				Chapters = [],
 				CoverImage = coverImagefilePath,
 				FileName = fileName,
-				CurrentChapter = 1,
-				CurrentPage = 1,
 				NumberOfChapters = epub.TableOfContents.Count,
 				NumberOfPages = html.Count,
 				Title = epub.Title,
 			};
-			var numberOfPages = 0;
-			var toc = new List<Toc>();
-			epub.TableOfContents.ToList().ForEach(x => toc.Add(new Toc { Title = x.Title }));
-			book.TOC = toc;
 			epub.Authors.ToList().ForEach(x => book.Authors.Add(new Author { Name = x }));
-			foreach (var item in epub.TableOfContents.Select(x => x.Title))
+			foreach (var item in epub.TableOfContents)
 			{
-				var htmlFile = html.ToList().FindAll(x => x.TextContent.Contains(item));
-				if (htmlFile == null)
+				var htmlFile = html.ToList().Find(x => x.AbsolutePath == item.AbsolutePath);
+				if(htmlFile is not null)
 				{
-					continue;
+					var chapter = new Chapter
+					{
+						Title = item.Title
+					};
+					book.TOC.Add(new Toc { Title = item.Title });
+					chapter.Html = htmlFile.TextContent;
+					chapter.PlainText = Html.GetContentAsPlainText(htmlFile.TextContent) ?? string.Empty;
+					book.TOC.Add(new Toc { Title = item.Title });
+					book.Chapters.Add(chapter);
 				}
-				var chapter = new Chapter
-				{
-					Title = item
-				};
-				if (htmlFile.Count > 1)
-				{
-
-					chapter.Html = htmlFile[1].TextContent;
-					chapter.StartPage = numberOfPages + 1;
-					chapter.PlainText = Html.GetContentAsPlainText(htmlFile[1].TextContent) ?? string.Empty;
-					numberOfPages += htmlFile.Count;
-					chapter.EndPage = numberOfPages;
-				}
-				else
-				{
-					chapter.Html = htmlFile[0].TextContent;
-					chapter.PlainText = Html.GetContentAsPlainText(htmlFile[0].TextContent) ?? string.Empty;
-				}
-				book.NumberOfPages = numberOfPages;
-				book.TOC.Add(new Toc { Title = item });
-				book.Chapters.Add(chapter);
 			}
 			return book;
 		}
@@ -70,5 +51,13 @@ public static class BookManagement
 			System.Diagnostics.Trace.TraceError($"Error parsing book: {ex.Message}");
 			return null;
 		}
+	}
+	public static  Chapter? GetCurrrentChapter(Book book, int currentPage)
+	{
+		if (book is null)
+		{
+			return null;
+		}
+		return book.Chapters.Find(x => x.StartPage <= currentPage && x.EndPage >= currentPage);
 	}
 }

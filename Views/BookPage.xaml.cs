@@ -1,29 +1,29 @@
 ﻿using CommunityToolkit.Maui.Views;
-using CommunityToolkit.Mvvm.Input;
 using MauiEpubReader.Models;
 using MauiEpubReader.Services;
 using MauiEpubReader.ViewModels;
 using MetroLog;
 using SharpHook;
+using Application = Microsoft.Maui.Controls.Application;
 
 namespace MauiEpubReader.Views;
 
-public partial class BookPage : ContentPage
+public partial class BookPage : ContentPage, IDisposable
 {
-	int chapterOffset = 0;
 	Label pageCountLabel = new();
 	List<string> pages = [];
 	int currentPageIndex = 0;
 	Book? book;
-	readonly IKeyboardServices? keyboardServices;
+	readonly TaskPoolGlobalHook hook;
+	bool disposedValue;
 	static readonly ILogger logger = LoggerFactory.GetLogger(nameof(BookPage));
-	public BookPage(BookViewModel viewModel, IKeyboardServices keyboardServices)
+	public BookPage(BookViewModel viewModel)
 	{
 		InitializeComponent();
-		this.keyboardServices = keyboardServices;
+		hook = new TaskPoolGlobalHook();
+		hook.RunAsync();
+		hook.KeyPressed += Hook_KeyPressed;
 		BindingContext = viewModel;
-		ArgumentNullException.ThrowIfNull(keyboardServices);
-		keyboardServices.Hook.KeyPressed += Hook_KeyPressed;
 	}
 
 	void DisplayCurrentPage()
@@ -32,7 +32,8 @@ public partial class BookPage : ContentPage
 		ArgumentNullException.ThrowIfNull(book);
 		if (currentPageIndex < pages.Count && pages.Count > 0)
 		{
-			MainThread.BeginInvokeOnMainThread(() => {TextLabel.Text = pages[currentPageIndex]; pageCountLabel.Text = $"Chapter: {book.CurrentChapter}  Page:  {book.CurrentPage} - {book.NumberOfPages}";
+			int currentChapter = BookPage.GetChapterNumber(book.Chapters[book.CurrentChapter].Title);
+			MainThread.BeginInvokeOnMainThread(() => {TextLabel.Text = pages[currentPageIndex]; pageCountLabel.Text = $"Chapter: {currentChapter}  Page:  {book.CurrentPage} - {book.NumberOfPages}";
 				OnPropertyChanged(nameof(pageCountLabel));
 			});
 		}
@@ -41,66 +42,39 @@ public partial class BookPage : ContentPage
 			logger.Error("Invalid page index");
 		}
 	}
-	void GotoPage(int index)
+	void GotoPage(int page)
 	{
-		if (index >= 0 && index < pages.Count)
+		logger.Info($"Page: {page}");
+		ArgumentNullException.ThrowIfNull(book);
+		book.CurrentPage = page;
+		var currenChapter = BookManagement.GetCurrrentChapter(book, page);
+
+		if (currenChapter is not null)
 		{
-			currentPageIndex = index;
+			book.CurrentChapter = book.Chapters.IndexOf(currenChapter);
+			int currentChapter = BookPage.GetChapterNumber(book.Chapters[book.CurrentChapter].Title);
+			logger.Info($"CurrentChapter: {currentChapter}");
+			pages = LoadChapter(currenChapter);
+			logger.Info($"Pages: {pages.Count}");
+			currentPageIndex = book.CurrentPage - currenChapter.StartPage;
 			DisplayCurrentPage();
-		}
-		else
-		{
-			ArgumentNullException.ThrowIfNull(book);
-			var currentChapter = GetCurrrentChapter(book.CurrentPage);
-			if (currentChapter is not null)
-			{
-				book.CurrentChapter = book.Chapters.IndexOf(currentChapter);
-				pages = LoadChapter(currentChapter);
-				currentPageIndex = book.CurrentPage - currentChapter.StartPage;
-				if (currentPageIndex < 0)
-				{
-					logger.Error("Invalid page index");
-					currentPageIndex = 0;
-				}
-				GotoPage(currentPageIndex);
-			}
-			else
-			{
-				logger.Error("Invalid page index");
-			}
-		}
-	}
-	public void LoadBook(Book ebook)
-	{
-		book = ebook;
-		int count = 0;
-		book.Chapters.ForEach(x =>
-		{
-			if(!x.Title.Contains("CHAPTER"))
-			{
-				chapterOffset++;
-				return;
-			}
-			x.StartPage = count;
-			count += PageCount(x.PlainText, (int)Height) ?? 0;
-			x.EndPage = count;
-		});
-		book.NumberOfPages = count;
-		var currentChapter = ebook.CurrentChapter;
-		var temp= ebook.Chapters.FindAll(x => x.Title == $"CHAPTER {currentChapter}");
-		if (temp is null)
-		{
-			logger.Error("Chapter not found");
 			return;
 		}
-		List<Chapter>? chapter = ebook.Chapters.FindAll(x => x.Title == $"CHAPTER {currentChapter}");
-		pages = SplitTextIntoPages(chapter?[0].PlainText);
-		currentPageIndex = 0;
-		book.CurrentPage = 1;
-		CreateToolBar();
-		GotoPage(1);
+		logger.Error("CurrentChapter is null");
 	}
-
+	void UpdatePageData()
+	{
+		ArgumentNullException.ThrowIfNull(book);
+		int tempPages = 0;		
+		book.Chapters.ForEach(x =>
+		{
+			x.StartPage = tempPages;
+			x.EndPage = LoadChapter(x).Count + x.StartPage;
+			tempPages = x.EndPage;
+			tempPages++;
+		});
+		book.NumberOfPages = tempPages;
+	}
 	void CreateToolBar()
 	{
 		Shell.Current.ToolbarItems.Clear();
@@ -119,9 +93,8 @@ public partial class BookPage : ContentPage
 					Command = new Command(() =>
 					{
 						pages = LoadChapter(chapter);
-						currentPageIndex = 0;
 						book.CurrentPage = chapter.StartPage;
-						GotoPage(0);
+						GotoPage(book.CurrentPage);
 					})
 				};
 				Shell.Current.ToolbarItems.Add(toolbarItem);
@@ -129,37 +102,25 @@ public partial class BookPage : ContentPage
 			count++;
 		}
 	}
-	static int? PageCount(string? longText, int pageHeight)
-	{
-		if (string.IsNullOrEmpty(longText))
-		{
-			return null;
-		}
 
-		var buttonHeight = 50; // Adjust based on your button height
-		var lineHeight = 20; // Adjust based on your line height
-		return StringPaginator.SplitTextIntoPages(longText, pageHeight, buttonHeight, lineHeight).Count;
-	}
-	List<string> SplitTextIntoPages(string? longText)
+	static int GetChapterNumber(string title)
 	{
-		if (string.IsNullOrEmpty(longText))
+		var chapter = title.Replace("CHAPTER", "").Trim();
+		if (int.TryParse(chapter, out int result))
 		{
-			return [];
+			return result;
 		}
-		var pageHeight = this.Height - 70;
-		var buttonHeight = 50; // Adjust based on your button height
-		var lineHeight = 20; // Adjust based on your line height
-
-		return StringPaginator.SplitTextIntoPages(longText, pageHeight, buttonHeight, lineHeight);
+		return 0;
 	}
 	void OnTapGestureRecognizerTapped(object sender, TappedEventArgs e)
 	{
 		ArgumentNullException.ThrowIfNull(book);
+		int currentChapter = BookPage.GetChapterNumber(book.Chapters[book.CurrentChapter].Title);
 		pageCountLabel = new Label
 		{
 			FontSize = 12,
 			FontAttributes = FontAttributes.Bold,
-			Text = $"Chapter: {book.CurrentChapter}  Page:  {book.CurrentPage} - {book.NumberOfPages}",
+			Text = $"Chapter: {currentChapter}  Page:  {book.CurrentPage} - {book.NumberOfPages}",
 			HorizontalTextAlignment = TextAlignment.Center,
 			HorizontalOptions = LayoutOptions.Center
 		};
@@ -212,39 +173,19 @@ public partial class BookPage : ContentPage
 		{
 			return [];
 		}
-		return SplitTextIntoPages(chapter.PlainText);
+		var pageHeight = this.Height - 70;
+		var buttonHeight = 50; // Adjust based on your button height
+		var lineHeight = 20; // Adjust based on your line height
+		return StringPaginator.SplitTextIntoPages(chapter.PlainText, pageHeight, buttonHeight, lineHeight);
 	}
-	Chapter? GetCurrrentChapter(int currentPage)
-	{
-		if (book is null)
-		{
-			return null;
-		}
-		return book.Chapters.Find(x => x.StartPage <= currentPage && x.EndPage >= currentPage);
-	}
+	
 	void slider_DragCompleted(object? sender, EventArgs e)
 	{
 		ArgumentNullException.ThrowIfNull(sender);
 		ArgumentNullException.ThrowIfNull(book);
 		var slider = (Slider)sender;
 		book.CurrentPage = (int)slider.Value;
-		var currenChapter = GetCurrrentChapter(book.CurrentPage);
-		
-		if (currenChapter is not null)
-		{
-			book.CurrentChapter = GetCurrentChapterNumber(currenChapter);
-			pages = LoadChapter(currenChapter);
-			currentPageIndex = book.CurrentPage - currenChapter.StartPage;
-			GotoPage(currentPageIndex);
-			pageCountLabel.Text = $"Chapter: {book.CurrentChapter}  Page:  {book.CurrentPage} - {book.NumberOfPages}";
-			OnPropertyChanged(nameof(pageCountLabel));
-		}
-	}
-
-	int GetCurrentChapterNumber(Chapter chapter)
-	{
-		ArgumentNullException.ThrowIfNull(book);
-		return book.Chapters.IndexOf(chapter) - chapterOffset + 1;
+		GotoPage(book.CurrentPage);
 	}
 	void ContentPage_Loaded(object sender, EventArgs e)
 	{
@@ -253,58 +194,34 @@ public partial class BookPage : ContentPage
 			logger.Error("BindingContext is not BookViewModel");
 			return;
 		}
-		LoadBook(vm.Book);
+		book = vm.Book;
+		UpdatePageData();
+		CreateToolBar();
+		GotoPage(1);
 	}
 
 	void SwipeGestureRecognizer_Right(object sender, SwipedEventArgs e)
 	{
 		ArgumentNullException.ThrowIfNull(book);
-		if(book.CurrentPage + 1 < book.NumberOfPages)
+		if (book.CurrentPage + 1 >= book.NumberOfPages)
 		{
-			book.CurrentPage++;
-			if (currentPageIndex + 1 < pages.Count)
-			{
-				currentPageIndex++;
-				GotoPage(currentPageIndex);
-				return;
-			}
-			var currentChapter = GetCurrrentChapter(book.CurrentPage);
-			if (currentChapter is not null)
-			{
-				book.CurrentChapter = GetCurrentChapterNumber(currentChapter);
-				pages = LoadChapter(currentChapter);
-				currentPageIndex = 0;
-				GotoPage(currentPageIndex);
-				return;
-			}
-			logger.Error("Invalid page index");
+			logger.Error("End of book");
+			return;
 		}
+		book.CurrentPage++;
+		GotoPage(book.CurrentPage);
 	}
 
 	void SwipeGestureRecognizer_Left(object sender, SwipedEventArgs e)
 	{
 		ArgumentNullException.ThrowIfNull(book);
-		
-		if (book.CurrentPage - 1 > 0)
+		if(book.CurrentPage <= 0)
 		{
-			book.CurrentPage--;
-			if (currentPageIndex - 1 >= 0)
-			{
-				currentPageIndex--;
-				GotoPage(currentPageIndex);
-				return;
-			}
-			var currentChapter = GetCurrrentChapter(book.CurrentPage);
-			if (currentChapter is not null)
-			{
-				book.CurrentChapter = GetCurrentChapterNumber(currentChapter);
-				pages = LoadChapter(currentChapter);
-				currentPageIndex = pages.Count - 1;
-				GotoPage(currentPageIndex);
-				return;
-			}
-			logger.Error("Invalid page index");
+			logger.Error("Start of book");
+			return;
 		}
+		book.CurrentPage--;
+		GotoPage(book.CurrentPage);
 	}
 
 	void Hook_KeyPressed(object? sender, KeyboardHookEventArgs e)
@@ -321,10 +238,36 @@ public partial class BookPage : ContentPage
 				break;
 		}
 	}
-	~BookPage()
+	protected override void OnDisappearing()
 	{
-		ArgumentNullException.ThrowIfNull(keyboardServices);
-		keyboardServices.Hook.KeyPressed -= Hook_KeyPressed;
+		hook.Dispose();
+		logger.Info("Dissapearing");
+	}
+	protected override void OnNavigatedFrom(NavigatedFromEventArgs args)
+	{
+		base.OnNavigatedFrom(args);
+		hook.Dispose();
+		logger.Info("NavigatedFrom");
+	}
+
+	protected virtual void Dispose(bool disposing)
+	{
+		if (!disposedValue)
+		{
+			if (disposing)
+			{
+				System.Diagnostics.Trace.TraceInformation("Disposing");
+				hook.Dispose();
+			}
+
+			disposedValue = true;
+		}
+	}
+
+	public void Dispose()
+	{
+		Dispose(disposing: true);
+		GC.SuppressFinalize(this);
 	}
 }
 
