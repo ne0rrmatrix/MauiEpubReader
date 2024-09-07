@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<ContentPage
+    x:Class="MauiEpubReader.Views.LibraryPage"
+    xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+    xmlns:Models="clr-namespace:MauiEpubReader.Models"
+    xmlns:d="http://schemas.microsoft.com/dotnet/2021/maui/design"
+    xmlns:ffimage="clr-namespace:FFImageLoading.Maui;assembly=FFImageLoading.Maui"
+    xmlns:ios="clr-namespace:Microsoft.Maui.Controls.PlatformConfiguration.iOSSpecific;assembly=Microsoft.Maui.Controls"
+    xmlns:local="clr-namespace:MauiEpubReader.Views"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:toolkit="http://schemas.microsoft.com/dotnet/2022/maui/toolkit"
+    xmlns:viewModel="clr-namespace:MauiEpubReader.ViewModels"
+    ios:Page.UseSafeArea="False"
+    x:DataType="viewModel:LibraryViewModel"
+    mc:Ignorable="d">
+    <ContentPage.ToolbarItems>
+
+        <ToolbarItem
+            Command="{Binding Source={RelativeSource AncestorType={x:Type viewModel:LibraryViewModel}}, Path=AddCommand}"
+            IconImageSource="add_circle.png"
+            Order="Primary" />
+    </ContentPage.ToolbarItems>
+    <CollectionView
+        Grid.Row="1"
+        HorizontalScrollBarVisibility="Never"
+        ItemsSource="{Binding Books}"
+        SelectionMode="Single"
+        VerticalScrollBarVisibility="Never">
+        <CollectionView.ItemsLayout>
+            <GridItemsLayout Orientation="Vertical" Span="3" />
+        </CollectionView.ItemsLayout>
+        <CollectionView.ItemTemplate>
+            <DataTemplate x:DataType="Models:Book">
+                <StackLayout HorizontalOptions="Center">
+                    <Label
+                        FontSize="Large"
+                        HorizontalTextAlignment="Center"
+                        Text="{Binding Title}" />
+                    <CollectionView
+                        HorizontalOptions="Center"
+                        ItemsSource="{Binding Authors}"
+                        VerticalScrollBarVisibility="Never">
+                        <CollectionView.ItemsLayout>
+                            <LinearItemsLayout Orientation="Horizontal" />
+                        </CollectionView.ItemsLayout>
+                        <CollectionView.ItemTemplate>
+                            <DataTemplate x:DataType="Models:Author">
+                                <Label FontSize="Small" Text="{Binding Name}" />
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+                    </CollectionView>
+                    <ffimage:CachedImage
+                        Aspect="AspectFit"
+                        HeightRequest="200"
+                        HorizontalOptions="Center"
+                        Source="{Binding CoverImage}">
+                        <ffimage:CachedImage.GestureRecognizers>
+                            <TapGestureRecognizer Command="{Binding Source={RelativeSource AncestorType={x:Type viewModel:LibraryViewModel}}, Path=GotoBookPageCommand}" CommandParameter="{Binding .}" />
+                        </ffimage:CachedImage.GestureRecognizers>
+                    </ffimage:CachedImage>
+                </StackLayout>
+            </DataTemplate>
+        </CollectionView.ItemTemplate>
+    </CollectionView>
+</ContentPage>
